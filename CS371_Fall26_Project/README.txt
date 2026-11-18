@@ -18,7 +18,7 @@ Each group member contributes to the project through commits and updates to the 
 GENERAL INFO
 ============
 This project is a multiplayer implementation of the classic Pong game using Python and a
-client-server architecture.
+client-server architecture to allow two players to connect and play against each other
  
 The server runs the game: it tracks both paddles, the ball, and the score, and sends the
 official game state to both clients about 60 times per second. The clients provide the graphical game interface 
@@ -37,22 +37,31 @@ You can find more information about running this program below in the 'Running t
 
 REQUIREMENTS
 ============
-Python 3
-Pygame 2.5.2
-Any Additional dependencies listed in requirements.txt
+
+Python 3.12 (hightly recommended)
+Pygame 2.5.2 (listed in requirements.txt)
+
+Additional dependencies listed in requirements.txt
 
 INSTALL INSTRUCTIONS
 ====================
 First clone the project repository then navigate to the project directory.
-
 Run the following line to install the required libraries for this project:
 
 `pip3 install -r requirements.txt`
 
-If uisng a Mac, make sure to download the latest python version. Most Mac use Apple’s built-in Tk 8.5. 
-Tk 8.5 can’t read PNG files, so you'll run into image rendering issues. while Tk 8.6 or higher can read PNG files correctly. 
-
-Recommeded command: 'python3.12 -m pip install -r requirements.txt'
+Windows / Linux:
+    Python 3.12 works as is. Use `python` or `python3` in the commands below.
+ 
+macOS:
+    Apple's built-in Python uses Tk 8.5, which cannot read PNG files, so Tkinter will not display 
+    the provided PNG logo causing the client to crash on the start screen with an error message: "couldn't recognize data in image file".
+    Install Python 3.12 from python.org (the macOS installer includes Tk 8.6 or higher), then run:
+ 
+        python3.12 -m pip install -r requirements.txt
+ 
+    Do not use the newest Python release (e.g. 3.15 or 3.16): pygame 2.5.2 has no prebuilt package
+    for it, so the install tries to compile pygame and fails.
 
 RUNNING THE PROGRAM
 ====================
