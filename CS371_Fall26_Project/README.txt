@@ -18,7 +18,7 @@ Each group member contributes to the project through commits and updates to the 
 GENERAL INFO
 ============
 This project is a multiplayer implementation of the classic Pong game using Python and a
-client-server architecture to allow two players to connect and play against each other
+client-server architecture to allow two players to connect and play against each other.
  
 The server runs the game: it tracks both paddles, the ball, and the score, and sends the
 official game state to both clients about 60 times per second. The clients provide the graphical game interface 
