@@ -8,6 +8,8 @@
 
 import socket
 import threading
+import json
+import time
 
 # Use this file to write your server logic
 # You will need to support at least two clients
@@ -15,3 +17,356 @@ import threading
 # for each player and where the ball is, and relay that to each client
 # I suggest you use the sync variable in pongClient.py to determine how out of sync your two
 # clients are and take actions to resync the games
+
+
+# Server configuration
+HOST = "0.0.0.0"
+PORT = 5555
+
+# Create TCP socket
+server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+# Allow the port to be reused
+server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+# Bind server to address and port
+server.bind((HOST, PORT))
+
+# Listen for incoming connections
+server.listen()
+
+print("Server is running...")
+print("Waiting for players to connect...")
+
+# Store connected players
+clients = []
+clients_lock = threading.Lock()
+game_running = True
+# Track whether both players are ready for another match.
+rematch_ready = {
+    1: False,
+    2: False
+}
+players_assigned = 0
+
+# Game state
+game_state = {
+    "paddle1_y": 215,
+    "paddle2_y": 215,
+    "ball_x": 320,
+    "ball_y": 240,
+    "score1": 0,
+    "score2": 0,
+    "sync": 0,
+    "winner": None,
+    "game_over": False,
+    "rematch_ready1": False,
+    "rematch_ready2": False
+}
+
+ball_dx = -3.5
+ball_dy = 0
+next_serve_time = 0
+
+# Protect shared game state from simultaneous updates
+game_lock = threading.Lock()
+
+
+def handle_client(conn, player_number):
+
+    global game_running
+    print(f"Listening for Player {player_number}")
+
+    try:
+        with conn.makefile("r", encoding="utf-8") as reader:
+            for line in reader:
+                message = json.loads(line)
+                print(f"Received from Player {player_number}: {message}")
+
+                # Check whether this player requested a rematch.
+                if message.get("rematch") is True:
+                    with game_lock:
+                        if game_state["game_over"]:
+                            rematch_ready[player_number] = True
+                            game_state[f"rematch_ready{player_number}"] = True
+                    continue
+
+                direction = message.get("direction")
+
+                if direction not in ("up", "down", "stop"):
+                    continue
+
+                paddle = f"paddle{player_number}_y"
+
+                with game_lock:
+                    if game_state["game_over"]:
+                        continue
+
+                    if direction == "up":
+                        game_state[paddle] -= 5
+                    elif direction == "down":
+                        game_state[paddle] += 5
+
+                    game_state[paddle] = max(
+                        10, min(420, game_state[paddle])
+                    )
+
+                    game_state["sync"] += 1
+
+                    print(f"Player {player_number} paddle position: {game_state[paddle]}")
+
+    except (OSError, ValueError) as error:
+        print(f"Player {player_number} error: {error}")
+
+    finally:
+        print(f"Player {player_number} disconnected")
+
+        with game_lock:
+            game_running = False
+
+        with clients_lock:
+            if conn in clients:
+                clients.remove(conn)
+
+        conn.close()
+
+
+def handle_spectator(conn: socket.socket) -> None:
+    print("Listening for spectator disconnect")
+
+    try:
+        while game_running:
+            data = conn.recv(1024)
+
+            if not data:
+                break
+
+    except OSError:
+        pass
+
+    finally:
+        print("Spectator disconnected")
+
+        with clients_lock:
+            if conn in clients:
+                clients.remove(conn)
+
+        conn.close()
+
+
+def broadcast_game_state():
+    with game_lock:
+        message = json.dumps(game_state) + "\n"
+
+    with clients_lock:
+        connected_clients = clients.copy()
+
+    for conn in connected_clients:
+        try:
+            conn.sendall(message.encode("utf-8"))
+        except OSError:
+            with clients_lock:
+                if conn in clients:
+                    clients.remove(conn)
+
+            conn.close()
+
+
+def reset_game() -> None:
+    global ball_dx, ball_dy, next_serve_time
+
+    with game_lock:
+        # Reset scores and player positions.
+        game_state["score1"] = 0
+        game_state["score2"] = 0
+        game_state["paddle1_y"] = 215
+        game_state["paddle2_y"] = 215
+
+        # Reset the ball.
+        game_state["ball_x"] = 320
+        game_state["ball_y"] = 240
+        ball_dx = -3.5
+        ball_dy = 0
+        next_serve_time = time.monotonic() + 2
+
+        # Clear the previous winner and rematch requests.
+        game_state["winner"] = None
+        game_state["game_over"] = False
+        game_state["rematch_ready1"] = False
+        game_state["rematch_ready2"] = False
+
+        rematch_ready[1] = False
+        rematch_ready[2] = False
+
+        game_state["sync"] += 1
+
+
+def update_ball():
+    global ball_dx, ball_dy, next_serve_time
+
+    with game_lock:
+        if game_state["score1"] >= 5 or game_state["score2"] >= 5:
+            return
+
+        # Pause the ball at the center after a point
+        if time.monotonic() < next_serve_time:
+            return
+
+        game_state["ball_x"] += ball_dx
+        game_state["ball_y"] += ball_dy
+
+        x = game_state["ball_x"]
+        y = game_state["ball_y"]
+
+        # Bounce off top and bottom walls
+        if y <= 10:
+            game_state["ball_y"] = 10
+            ball_dy = abs(ball_dy)
+
+        elif y >= 465:
+            game_state["ball_y"] = 465
+            ball_dy = -abs(ball_dy)
+
+        # Left paddle collision
+        if ball_dx < 0 and x <= 20 and x + 5 >= 10:
+            paddle_y = game_state["paddle1_y"]
+
+            if y + 5 >= paddle_y and y <= paddle_y + 50:
+                game_state["ball_x"] = 20
+                ball_dx = abs(ball_dx)
+                ball_dy = max(-3, min(3, (y + 2 - (paddle_y + 25)) // 5))
+
+        # Right paddle collision
+        elif ball_dx > 0 and x + 5 >= 620 and x <= 630:
+            paddle_y = game_state["paddle2_y"]
+
+            if y + 5 >= paddle_y and y <= paddle_y + 50:
+                game_state["ball_x"] = 615
+                ball_dx = -abs(ball_dx)
+                ball_dy = max(-3, min(3, (y + 2 - (paddle_y + 25)) // 5))
+
+        # Scoring
+        if x > 640:
+            game_state["score1"] += 1
+            game_state["ball_x"] = 320
+            game_state["ball_y"] = 240
+            ball_dx = -3.5
+            ball_dy = 0
+            next_serve_time = time.monotonic() + 2
+
+        elif x < 0:
+            game_state["score2"] += 1
+            game_state["ball_x"] = 320
+            game_state["ball_y"] = 240
+            ball_dx = 3.5
+            ball_dy = 0
+            next_serve_time = time.monotonic() + 2
+
+        # Check whether either player has won
+        if game_state["score1"] >= 5:
+            game_state["winner"] = 1
+            game_state["game_over"] = True
+
+        elif game_state["score2"] >= 5:
+            game_state["winner"] = 2
+            game_state["game_over"] = True
+
+        game_state["sync"] += 1
+
+def run_game():
+    print("Both players connected!")
+    print("Game is ready to start!")
+
+    while game_running:
+        # Check whether both players requested a rematch.
+        with game_lock:
+            start_rematch = (
+                game_state["game_over"]
+                and rematch_ready[1]
+                and rematch_ready[2]
+            )
+
+        if start_rematch:
+            print("Both players are ready! Starting a new match.")
+            reset_game()
+
+        update_ball()
+        broadcast_game_state()
+        time.sleep(1 / 60)
+
+
+# Accept two players
+server.settimeout(1.0)
+
+while game_running:
+    try:
+        conn, addr = server.accept()
+    except socket.timeout:
+        continue
+
+    with clients_lock:
+        clients.append(conn)
+
+        if players_assigned < 2:
+            players_assigned += 1
+            player_number = players_assigned
+        else:
+            player_number = None
+
+    if player_number is not None:
+        print(f"Player {player_number} connected from {addr}")
+        conn.sendall(f"PLAYER {player_number}\n".encode())
+
+        threading.Thread(
+            target=handle_client,
+            args=(conn, player_number),
+            daemon=True
+        ).start()
+
+        if player_number == 2:
+            game_thread = threading.Thread(
+                target=run_game,
+                daemon=True
+            )
+            game_thread.start()
+    else:
+        print(f"Spectator connected from {addr}")
+        conn.sendall(b"SPECTATOR\n")
+
+        threading.Thread(
+            target=handle_spectator,
+            args=(conn,),
+            daemon=True
+        ).start()
+
+if not game_running:
+    print("A player disconnected before the game started.")
+    with clients_lock:
+        remaining_clients = clients.copy()
+
+    for conn in remaining_clients:
+        conn.close()
+
+    server.close()
+    raise SystemExit
+
+
+print("Game stopped.")
+
+# Close all remaining player connections
+with clients_lock:
+    remaining_clients = clients.copy()
+    clients.clear()
+
+for conn in remaining_clients:
+    try:
+        conn.shutdown(socket.SHUT_RDWR)
+    except OSError:
+        pass
+
+    conn.close()
+
+# Close the server socket
+server.close()
+
+print("Server shut down successfully.")
