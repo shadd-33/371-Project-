@@ -1,7 +1,7 @@
 # =================================================================================================
 # Contributing Authors: Noella Kule, Jacob Kulig, Shaddai Ngoyi
-# Email Addresses: nku239@uky.edu, jkulig29@uky.edu, sng234@uky.edu
-# Date: 11/16/2026
+# Email Addresses: nku239@uky.edu, jkulig29@uky.edu, Shaddai.Ngoyi@uky.edu
+# Date: 11/18/2026
 # Purpose: Implements the Pong client, allowing players to connect to the server, send paddle
 #          movements, and receive game updates for synchronized multiplayer gameplay.
 # Misc: Uses TCP sockets and JSON for client-server communication.
@@ -256,13 +256,19 @@ def playGame(screenWidth: int, screenHeight: int, playerPaddle: str,
 # Mainly the screen width, height and player paddle (either "left" or "right").
 # If you want to hard code the screen's dimensions into the code, that's fine, but you will
 # need to know which client is which.
-def joinServer(ip: str, port: str, errorLabel: tk.Label, app: tk.Tk) -> None:
+def joinServer(ip: str, port: str, errorLabel: tk.Label, app: tk.Tk, initials: str) -> None:
     # Purpose: This method is fired when the join button is clicked.
     # Arguments:
     # ip: A string holding the IP address of the server.
     # port: A string holding the port the server is using.
     # errorLabel: A tk label widget; modify its text to display messages to the user.
     # app: The tk window object, needed to kill the window.
+
+    # Check initials before connecting so invalid input does not reserve a player slot.
+    initials = initials.strip().upper()
+    if not (1 <= len(initials) <= 3 and initials.isascii() and initials.isalpha()):
+        errorLabel.config(text="Enter 1 to 3 letters for your initials.")
+        return
 
     # Create a socket and connect to the server.
     # You don't have to use SOCK_STREAM; use what you think is best.
@@ -292,6 +298,8 @@ def joinServer(ip: str, port: str, errorLabel: tk.Label, app: tk.Tk) -> None:
             raise ValueError("Unexpected server response: " + player_message)
 
         client.settimeout(None)
+        if playerPaddle != "spectator":
+            client.sendall((json.dumps({"initials": initials}) + "\n").encode("utf-8"))
     except (OSError, ValueError) as error:
         client.close()
         errorLabel.config(text=f"Connection failed: {error}")
@@ -329,13 +337,19 @@ def startScreen():
     portLabel.grid(column=0, row=2, sticky="W", padx=8)
     portEntry = tk.Entry(app)
     portEntry.grid(column=1, row=2)
+    initialsLabel = tk.Label(text="Your Initials:")
+    initialsLabel.grid(column=0, row=3, sticky="W", padx=8)
+    initialsEntry = tk.Entry(app)
+    initialsEntry.grid(column=1, row=3)
     errorLabel = tk.Label(text="")
-    errorLabel.grid(column=0, row=4, columnspan=2)
-    joinButton = tk.Button(text="Join", command=lambda: joinServer(ipEntry.get(), portEntry.get(), errorLabel, app))
-    joinButton.grid(column=0, row=3, columnspan=2)
+    errorLabel.grid(column=0, row=5, columnspan=2)
+    joinButton = tk.Button(
+        text="Join",
+        command=lambda: joinServer(ipEntry.get(), portEntry.get(), errorLabel, app, initialsEntry.get())
+    )
+    joinButton.grid(column=0, row=4, columnspan=2)
     app.mainloop()
 
 if __name__ == "__main__":
     startScreen()
-
 
