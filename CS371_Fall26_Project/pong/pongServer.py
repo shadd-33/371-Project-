@@ -1,22 +1,20 @@
 # =================================================================================================
-# Contributing Authors:	    <Anyone who touched the code>
-# Email Addresses:          <Your uky.edu email addresses>
-# Date:                     <The date the file was last edited>
-# Purpose:                  <How this file contributes to the project>
-# Misc:                     <Not Required.  Anything else you might want to include>
+# Contributing Authors:	    Noella Kule, Jacob Kulig, Shaddai Ngoyi
+# Email Addresses:          nku239@uky.edu, jkulig29@uky.edu, Shaddai.Ngoyi@uky.edu
+# Date:                     11/18/2026
+# Purpose:                  Implements the Pong server, managing client connections, player movements,
+#                           ball physics, scoring, and synchronized multiplayer gameplay.
+# Misc:                     Uses TCP sockets, JSON, and threading to support two players, unlimited
+#                           spectators, and a play-again feature.
 # =================================================================================================
 
 import socket
 import threading
 import json
 import time
-
-# Use this file to write your server logic
-# You will need to support at least two clients
-# You will need to keep track of where on the screen (x,y coordinates) each paddle is, the score 
-# for each player and where the ball is, and relay that to each client
-# I suggest you use the sync variable in pongClient.py to determine how out of sync your two
-# clients are and take actions to resync the games
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from html import escape
+from pathlib import Path
 
 
 # Server configuration
@@ -71,6 +69,73 @@ next_serve_time = 0
 # Protect shared game state from simultaneous updates
 game_lock = threading.Lock()
 
+# Persistent leaderboard (one win recorded per completed match).
+LEADERBOARD_PORT = 80
+LEADERBOARD_FILE = Path(__file__).with_name("leaderboard.json")
+leaderboard_lock = threading.Lock()
+player_initials = {1: "P1", 2: "P2"}
+
+try:
+    with LEADERBOARD_FILE.open("r", encoding="utf-8") as file:
+        leaderboard = json.load(file)
+    if not isinstance(leaderboard, dict):
+        leaderboard = {}
+except (OSError, ValueError):
+    leaderboard = {}
+
+
+def record_win(player_number):
+    initials = player_initials[player_number]
+    with leaderboard_lock:
+        leaderboard[initials] = leaderboard.get(initials, 0) + 1
+        try:
+            with LEADERBOARD_FILE.open("w", encoding="utf-8") as file:
+                json.dump(leaderboard, file, indent=4)
+        except OSError as error:
+            print(f"Could not save leaderboard: {error}")
+    print(f"Win recorded for {initials}")
+
+
+class LeaderboardHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path not in ("/", "/index.html"):
+            self.send_error(404)
+            return
+        with leaderboard_lock:
+            rankings = sorted(leaderboard.items(), key=lambda item: (-item[1], item[0]))
+        rows = "".join(
+            f"<tr><td>{rank}</td><td>{escape(name)}</td><td>{wins}</td></tr>"
+            for rank, (name, wins) in enumerate(rankings, 1)
+        )
+        page = f"""<!doctype html>
+<html><head><meta charset="utf-8"><meta http-equiv="refresh" content="5">
+<title>Pong Leaderboard</title>
+<style>
+body {{ background:#101827; color:white; font-family:Arial,sans-serif; text-align:center; padding:40px; }}
+table {{ margin:auto; border-collapse:collapse; width:min(650px,95%); }}
+th,td {{ padding:15px; border-bottom:1px solid #555; }}
+th {{ color:#55d6ff; }}
+</style></head><body><h1>PONG LEADERBOARD</h1>
+<p>Win totals - refreshes every 5 seconds</p>
+<table><tr><th>Rank</th><th>Initials</th><th>Wins</th></tr>{rows}</table>
+</body></html>"""
+        data = page.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+
+def start_leaderboard():
+    try:
+        http_server = ThreadingHTTPServer((HOST, LEADERBOARD_PORT), LeaderboardHandler)
+        print(f"Leaderboard available on port {LEADERBOARD_PORT}")
+        http_server.serve_forever()
+    except OSError as error:
+        print(f"Leaderboard could not start: {error}")
+
+
 
 def handle_client(conn, player_number):
 
@@ -81,6 +146,14 @@ def handle_client(conn, player_number):
         with conn.makefile("r", encoding="utf-8") as reader:
             for line in reader:
                 message = json.loads(line)
+                # Register player initials; spectators do not register.
+                if "initials" in message:
+                    initials = str(message["initials"]).strip().upper()
+                    if 1 <= len(initials) <= 3 and initials.isascii() and initials.isalpha():
+                        with game_lock:
+                            player_initials[player_number] = initials
+                        print(f"Player {player_number} registered as {initials}")
+                    continue
                 print(f"Received from Player {player_number}: {message}")
 
                 # Check whether this player requested a rematch.
@@ -262,14 +335,16 @@ def update_ball():
             ball_dy = 0
             next_serve_time = time.monotonic() + 2
 
-        # Check whether either player has won
-        if game_state["score1"] >= 5:
-            game_state["winner"] = 1
-            game_state["game_over"] = True
-
-        elif game_state["score2"] >= 5:
-            game_state["winner"] = 2
-            game_state["game_over"] = True
+        # Record exactly one win per match, including after rematches.
+        if not game_state["game_over"]:
+            if game_state["score1"] >= 5:
+                game_state["winner"] = 1
+                game_state["game_over"] = True
+                record_win(1)
+            elif game_state["score2"] >= 5:
+                game_state["winner"] = 2
+                game_state["game_over"] = True
+                record_win(2)
 
         game_state["sync"] += 1
 
@@ -294,6 +369,9 @@ def run_game():
         broadcast_game_state()
         time.sleep(1 / 60)
 
+
+# Serve leaderboard in a separate thread alongside the Pong TCP server.
+threading.Thread(target=start_leaderboard, daemon=True).start()
 
 # Accept two players
 server.settimeout(1.0)
