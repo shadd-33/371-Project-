@@ -17,14 +17,23 @@ Each group member contributes to the project through commits and updates to the 
 
 GENERAL INFO
 ============
-This project is a multiplayer implementation of the classic Pong game using Python and a client-server architecture.
+This project is a multiplayer implementation of the classic Pong game using Python and a
+client-server architecture.
+ 
+The server runs the game: it tracks both paddles, the ball, and the score, and sends the
+official game state to both clients about 60 times per second. The clients provide the graphical game interface 
+and allow players to control their paddles.
 
-The server manages communication between players, while clients allow players to interact with the game. 
-Socket programming and threading are used to support multiplayer functionality.
+Socket programming and multithreading are used to support communication between the server and both clients.
 
-You can find more information about running this program below in the Running the Program Section.
+Files:
+    pong/pongServer.py   The server that hosts the game
+    pong/pongClient.py   The client (start screen + game window)
+    pong/assets/         Fonts, images, sounds and helper code provided with the project
+    requirements.txt     Python libraries needed to run the project
+    README.txt           This current file
 
--- This file describes how to install/run your program and anything else you think the user should know --
+You can find more information about running this program below in the 'Running the Program' Section.
 
 REQUIREMENTS
 ============
