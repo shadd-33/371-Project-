@@ -1,6 +1,6 @@
 # =================================================================================================
 # Contributing Authors: Noella Kule, Jacob Kulig, Shaddai Ngoyi
-# Email Addresses: nku239@uky.edu, jkulig29@uky.edu, Shaddai.Ngoyi@uky.edu
+# Email Addresses: nku239@uky.edu, jkulig29@uky.edu, sng234@uky.edu
 # Date: 11/18/2026
 # Purpose: Implements the Pong client, allowing players to connect to the server, send paddle
 #          movements, and receive game updates for synchronized multiplayer gameplay.
